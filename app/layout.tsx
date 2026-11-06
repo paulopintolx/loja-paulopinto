@@ -1,3 +1,5 @@
+import './globals.css';
+
 export const metadata = {
   title: 'Loja Paulopinto',
   description: 'Loja de fotografia, impressões, postais personalizados e vouchers.',
