@@ -11,6 +11,10 @@ type Product = {
   image: string;
 };
 
+type CartItem = Product & {
+  quantity: number;
+};
+
 type User = {
   name: string;
   email: string;
@@ -69,7 +73,7 @@ export default function Storefront() {
   const [customerName, setCustomerName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [cart, setCart] = useState<Product[]>([]);
+  const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedTag, setSelectedTag] = useState('Todos');
   const [uploadPreview, setUploadPreview] = useState<string | null>(null);
   const [selectedFrame, setSelectedFrame] = useState(frames[0]);
@@ -77,6 +81,7 @@ export default function Storefront() {
   const [voucherCode, setVoucherCode] = useState('');
   const [appliedVoucher, setAppliedVoucher] = useState<{ code: string; discount: number } | null>(null);
   const [quote, setQuote] = useState({ name: '', email: '', details: '' });
+  const [postalMessage, setPostalMessage] = useState('Feliz Natal e um 2027 cheio de momentos especiais!');
 
   useEffect(() => {
     const savedUser = window.localStorage.getItem('paulopinto-user');
@@ -100,16 +105,38 @@ export default function Storefront() {
     return catalog.filter((product) => product.tag === selectedTag);
   }, [selectedTag]);
 
-  const subtotal = cart.reduce((sum, item) => sum + item.price, 0);
+  const subtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const discountAmount = appliedVoucher ? (subtotal * appliedVoucher.discount) / 100 : 0;
   const total = Math.max(0, subtotal - discountAmount);
 
   const addToCart = (product: Product) => {
-    setCart((current) => [...current, product]);
+    setCart((current) => {
+      const existing = current.find((item) => item.id === product.id);
+
+      if (existing) {
+        return current.map((item) =>
+          item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item,
+        );
+      }
+
+      return [...current, { ...product, quantity: 1 }];
+    });
   };
 
-  const removeFromCart = (index: number) => {
-    setCart((current) => current.filter((_, idx) => idx !== index));
+  const updateQuantity = (productId: number, direction: 'increase' | 'decrease') => {
+    setCart((current) =>
+      current
+        .map((item) => {
+          if (item.id !== productId) return item;
+          const nextQuantity = direction === 'increase' ? item.quantity + 1 : item.quantity - 1;
+          return nextQuantity <= 0 ? null : { ...item, quantity: nextQuantity };
+        })
+        .filter(Boolean) as CartItem[],
+    );
+  };
+
+  const removeFromCart = (productId: number) => {
+    setCart((current) => current.filter((item) => item.id !== productId));
   };
 
   const handleAuth = (event: FormEvent<HTMLFormElement>) => {
@@ -153,8 +180,39 @@ export default function Storefront() {
     setVoucherCode('');
   };
 
+  const handleStripeCheckout = () => {
+    if (cart.length === 0) {
+      alert('Adicione pelo menos um produto antes de continuar para o checkout.');
+      return;
+    }
+
+    const payload = {
+      cart,
+      subtotal,
+      discountAmount,
+      total,
+      user,
+      selectedFrame,
+      selectedOccasion,
+      postalMessage,
+      voucher: appliedVoucher,
+    };
+
+    window.localStorage.setItem('paulopinto-order', JSON.stringify(payload));
+    alert('Pedido guardado para checkout. Integração Stripe pode ser ligada com as variáveis de ambiente da Netlify.');
+  };
+
   const submitQuote = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+
+    const payload = {
+      name: quote.name,
+      email: quote.email,
+      details: quote.details,
+      createdAt: new Date().toISOString(),
+    };
+
+    window.localStorage.setItem('paulopinto-quote', JSON.stringify(payload));
     alert('Pedido de orçamento enviado com sucesso. Vamos responder por email em breve.');
     setQuote({ name: '', email: '', details: '' });
   };
@@ -178,13 +236,15 @@ export default function Storefront() {
         </nav>
 
         <div className="nav-actions">
-          <button className="ghost-button">Carrinho ({cart.length})</button>
+          <button className="ghost-button" type="button">
+            Carrinho ({cart.reduce((sum, item) => sum + item.quantity, 0)})
+          </button>
           {user ? (
-            <button className="primary-button" onClick={() => setUser(null)}>
+            <button className="primary-button" type="button" onClick={() => setUser(null)}>
               Sair
             </button>
           ) : (
-            <button className="primary-button" onClick={() => setAuthMode('login')}>
+            <button className="primary-button" type="button" onClick={() => setAuthMode('login')}>
               Entrar
             </button>
           )}
@@ -248,6 +308,7 @@ export default function Storefront() {
             {['Todos', 'Premium', 'Popular', 'Postal', 'Studio'].map((tag) => (
               <button
                 key={tag}
+                type="button"
                 className={selectedTag === tag ? 'active' : ''}
                 onClick={() => setSelectedTag(tag)}
               >
@@ -269,7 +330,7 @@ export default function Storefront() {
                 <p>{product.description}</p>
                 <div className="product-footer">
                   <strong>{product.price.toFixed(2)} €</strong>
-                  <button className="primary-button small" onClick={() => addToCart(product)}>
+                  <button className="primary-button small" type="button" onClick={() => addToCart(product)}>
                     Adicionar
                   </button>
                 </div>
@@ -280,7 +341,7 @@ export default function Storefront() {
       </section>
 
       <section id="personalizar" className="studio-grid">
-        <div className="studio-panel large-panel">
+        <div className="panel large-panel">
           <p className="eyebrow accent">Criar postal</p>
           <h3>Faça upload e personalize o seu cartão</h3>
 
@@ -296,7 +357,7 @@ export default function Storefront() {
           )}
         </div>
 
-        <div className="studio-panel">
+        <div className="panel">
           <p className="eyebrow accent">Opções</p>
           <div className="option-stack">
             <div>
@@ -323,7 +384,7 @@ export default function Storefront() {
 
             <div>
               <label>Mensagem</label>
-              <textarea defaultValue="Feliz Natal e um 2027 cheio de momentos especiais!" rows={4} />
+              <textarea rows={4} value={postalMessage} onChange={(event) => setPostalMessage(event.target.value)} />
             </div>
           </div>
         </div>
@@ -337,10 +398,10 @@ export default function Storefront() {
               <h3>{user ? `Bem-vindo, ${user.name}` : 'Acessar conta'}</h3>
             </div>
             <div className="tabs">
-              <button className={authMode === 'login' ? 'active' : ''} onClick={() => setAuthMode('login')}>
+              <button className={authMode === 'login' ? 'active' : ''} type="button" onClick={() => setAuthMode('login')}>
                 Login
               </button>
-              <button className={authMode === 'signup' ? 'active' : ''} onClick={() => setAuthMode('signup')}>
+              <button className={authMode === 'signup' ? 'active' : ''} type="button" onClick={() => setAuthMode('signup')}>
                 Registar
               </button>
             </div>
@@ -389,15 +450,26 @@ export default function Storefront() {
             {cart.length === 0 ? (
               <p className="empty-state">Ainda não adicionou produtos.</p>
             ) : (
-              cart.map((item, index) => (
-                <div className="cart-item" key={`${item.id}-${index}`}>
+              cart.map((item) => (
+                <div className="cart-item" key={item.id}>
                   <div>
                     <strong>{item.name}</strong>
                     <small>{item.tag}</small>
                   </div>
-                  <div>
-                    <span>{item.price.toFixed(2)} €</span>
-                    <button onClick={() => removeFromCart(index)}>Remover</button>
+                  <div className="cart-controls">
+                    <div className="qty-controls">
+                      <button type="button" onClick={() => updateQuantity(item.id, 'decrease')}>
+                        −
+                      </button>
+                      <span>{item.quantity}</span>
+                      <button type="button" onClick={() => updateQuantity(item.id, 'increase')}>
+                        +
+                      </button>
+                    </div>
+                    <span>{(item.price * item.quantity).toFixed(2)} €</span>
+                    <button type="button" onClick={() => removeFromCart(item.id)}>
+                      Remover
+                    </button>
                   </div>
                 </div>
               ))
@@ -415,13 +487,17 @@ export default function Storefront() {
             </div>
             <div className="voucher-box">
               <input value={voucherCode} onChange={(event) => setVoucherCode(event.target.value)} placeholder="Código do voucher" />
-              <button className="ghost-button" onClick={applyVoucher}>Aplicar</button>
+              <button className="ghost-button" type="button" onClick={applyVoucher}>
+                Aplicar
+              </button>
             </div>
             <div className="total-row">
               <span>Total</span>
               <strong>{total.toFixed(2)} €</strong>
             </div>
-            <button className="primary-button full" type="button">Pagar com Stripe</button>
+            <button className="primary-button full" type="button" onClick={handleStripeCheckout}>
+              Pagar com Stripe
+            </button>
           </div>
         </div>
       </section>
